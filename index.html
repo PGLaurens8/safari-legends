@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Safari Legends</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       TITLE SCREEN
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="title-screen">
+    <div id="title-content">
+      <div id="title-logo">
+        <div id="title-eyebrow">A FIRST-PERSON HUNTING EXPERIENCE</div>
+        <h1 id="title-name">SAFARI<br><span>LEGENDS</span></h1>
+      </div>
+
+      <!-- Silhouette SVG: acacia trees, giraffe, elephant -->
+      <svg id="title-silhouette" viewBox="0 0 800 220" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMax meet">
+        <!-- Sky gradient bar -->
+        <defs>
+          <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#e8541a" stop-opacity="0.6"/>
+            <stop offset="100%" stop-color="#c8922a" stop-opacity="0.3"/>
+          </linearGradient>
+        </defs>
+        <rect width="800" height="220" fill="url(#skyGrad)"/>
+
+        <!-- Sun -->
+        <circle cx="400" cy="60" r="38" fill="#c8922a" opacity="0.9"/>
+
+        <!-- Ground line -->
+        <rect x="0" y="175" width="800" height="45" fill="#050a03"/>
+
+        <!-- Acacia tree left 1 -->
+        <rect x="60" y="130" width="8" height="46" fill="#050a03"/>
+        <ellipse cx="64" cy="118" rx="38" ry="14" fill="#050a03"/>
+        <ellipse cx="40" cy="122" rx="22" ry="10" fill="#050a03"/>
+        <ellipse cx="88" cy="124" rx="20" ry="9" fill="#050a03"/>
+
+        <!-- Acacia tree left 2 -->
+        <rect x="155" y="140" width="6" height="36" fill="#050a03"/>
+        <ellipse cx="158" cy="128" rx="30" ry="12" fill="#050a03"/>
+        <ellipse cx="138" cy="132" rx="18" ry="8" fill="#050a03"/>
+        <ellipse cx="178" cy="133" rx="17" ry="8" fill="#050a03"/>
+
+        <!-- Giraffe (centre-left) -->
+        <!-- body -->
+        <ellipse cx="270" cy="158" rx="22" ry="14" fill="#050a03"/>
+        <!-- neck -->
+        <rect x="280" y="100" width="11" height="62" fill="#050a03"/>
+        <!-- head -->
+        <ellipse cx="290" cy="96" rx="12" ry="8" fill="#050a03"/>
+        <!-- ossicones -->
+        <rect x="285" y="82" width="3" height="12" fill="#050a03"/>
+        <rect x="293" y="83" width="3" height="11" fill="#050a03"/>
+        <!-- legs -->
+        <rect x="252" y="170" width="7" height="30" fill="#050a03"/>
+        <rect x="264" y="170" width="7" height="30" fill="#050a03"/>
+        <rect x="276" y="170" width="7" height="30" fill="#050a03"/>
+        <rect x="288" y="170" width="7" height="30" fill="#050a03"/>
+
+        <!-- Elephant (centre-right) -->
+        <!-- body -->
+        <ellipse cx="510" cy="155" rx="40" ry="28" fill="#050a03"/>
+        <!-- head -->
+        <circle cx="548" cy="143" r="20" fill="#050a03"/>
+        <!-- trunk -->
+        <path d="M558 150 Q572 168 560 182" stroke="#050a03" stroke-width="8" fill="none" stroke-linecap="round"/>
+        <!-- ear -->
+        <ellipse cx="540" cy="138" rx="14" ry="18" fill="#050a03" opacity="0.7"/>
+        <!-- tusk -->
+        <path d="M550 154 Q564 158 562 166" stroke="#c8922a" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.8"/>
+        <!-- legs -->
+        <rect x="476" y="180" width="12" height="20" rx="3" fill="#050a03"/>
+        <rect x="494" y="180" width="12" height="20" rx="3" fill="#050a03"/>
+        <rect x="514" y="180" width="12" height="20" rx="3" fill="#050a03"/>
+        <rect x="532" y="180" width="12" height="20" rx="3" fill="#050a03"/>
+
+        <!-- Acacia tree right 1 -->
+        <rect x="636" y="135" width="7" height="41" fill="#050a03"/>
+        <ellipse cx="639" cy="122" rx="34" ry="13" fill="#050a03"/>
+        <ellipse cx="618" cy="126" rx="20" ry="9" fill="#050a03"/>
+        <ellipse cx="660" cy="127" rx="19" ry="8" fill="#050a03"/>
+
+        <!-- Acacia tree right 2 -->
+        <rect x="730" y="145" width="6" height="32" fill="#050a03"/>
+        <ellipse cx="733" cy="133" rx="26" ry="11" fill="#050a03"/>
+        <ellipse cx="714" cy="137" rx="16" ry="7" fill="#050a03"/>
+        <ellipse cx="752" cy="138" rx="15" ry="7" fill="#050a03"/>
+      </svg>
+
+      <button id="btn-begin" class="btn-primary">BEGIN HUNT</button>
+      <div id="title-tagline">400 × 400 UNIT SAVANNA &nbsp;·&nbsp; 11 SPECIES &nbsp;·&nbsp; 120 SECONDS</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       THREE.JS CANVAS (rendered behind everything)
+  ═══════════════════════════════════════════════════════════ -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       MAP VIEW OVERLAY
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="map-screen" class="hidden">
+    <div id="map-header">
+      <span id="map-mode-badge" class="mode-badge">MAP VIEW</span>
+    </div>
+    <canvas id="map-canvas"></canvas>
+    <button id="btn-enter-fps" class="btn-primary">&#9654; ENTER FIRST PERSON</button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       HUD (visible during FPS mode)
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="hud" class="hidden">
+
+    <!-- Top-left: Score + mute -->
+    <div id="hud-top-left">
+      <div id="score-label">SCORE</div>
+      <div id="score-value">0</div>
+      <button id="btn-mute" title="Toggle sound">&#128266;</button>
+    </div>
+
+    <!-- Top-centre: mode badge + timer -->
+    <div id="hud-top-centre">
+      <div id="fps-mode-badge" class="mode-badge">FIRST PERSON</div>
+      <div id="timer-display">2:00</div>
+    </div>
+
+    <!-- Top-right: Hits + minimap -->
+    <div id="hud-top-right">
+      <div id="hits-label">HITS</div>
+      <div id="hits-value">0</div>
+      <canvas id="minimap-canvas" width="140" height="140"></canvas>
+    </div>
+
+    <!-- Alert bar (top-centre, below mode badge) -->
+    <div id="alert-bar" class="hidden">
+      <span id="alert-animal"></span>
+      <span id="alert-points"></span>
+    </div>
+
+    <!-- Combo display (right-centre) -->
+    <div id="combo-display" class="hidden">
+      <div id="combo-label">COMBO</div>
+      <div id="combo-value">×1</div>
+    </div>
+
+    <!-- Pointer lock hint -->
+    <div id="pointer-hint">Click to lock mouse</div>
+
+    <!-- Crosshair (centre, hidden when scoped) -->
+    <div id="crosshair">
+      <div class="ch-h"></div>
+      <div class="ch-v"></div>
+    </div>
+
+    <!-- Scope overlay (shown when aiming) -->
+    <div id="scope-overlay" class="hidden">
+      <div id="scope-ring">
+        <!-- Horizontal crosshair line -->
+        <div class="scope-line scope-h"></div>
+        <!-- Vertical crosshair line -->
+        <div class="scope-line scope-v"></div>
+        <!-- Mil dots horizontal -->
+        <div class="mil-dot" style="left:25%; top:50%; transform:translate(-50%,-50%)"></div>
+        <div class="mil-dot" style="left:75%; top:50%; transform:translate(-50%,-50%)"></div>
+        <!-- Mil dots vertical -->
+        <div class="mil-dot" style="left:50%; top:25%; transform:translate(-50%,-50%)"></div>
+        <div class="mil-dot" style="left:50%; top:75%; transform:translate(-50%,-50%)"></div>
+        <!-- Glare -->
+        <div id="scope-glare"></div>
+        <!-- Zoom label -->
+        <div id="zoom-label">1.0×</div>
+      </div>
+    </div>
+
+    <!-- Wind indicator (bottom-right corner) -->
+    <div id="wind-indicator">
+      <span id="wind-arrow">&#8593;</span>
+      <span id="wind-speed">4 km/h</span>
+    </div>
+
+    <!-- Bottom-left: map toggle button (FPS) -->
+    <div id="hud-bottom-left">
+      <button id="btn-map-toggle" class="hud-btn">MAP &#8644; FPS</button>
+    </div>
+
+    <!-- Bottom-centre: reload bar -->
+    <div id="reload-bar-wrap" class="hidden">
+      <div id="reload-label">RELOADING</div>
+      <div id="reload-bar-track">
+        <div id="reload-bar-fill"></div>
+      </div>
+    </div>
+
+    <!-- Bottom-right: ammo display -->
+    <div id="ammo-display">
+      <div id="ammo-label">AMMO</div>
+      <div id="ammo-bars">
+        <!-- Populated by hud.js -->
+      </div>
+    </div>
+
+    <!-- Bottom edge: timer bar -->
+    <div id="timer-bar-track">
+      <div id="timer-bar-fill"></div>
+    </div>
+
+  </div><!-- end #hud -->
+
+  <!-- ═══════════════════════════════════════════════════════════
+       MOBILE CONTROLS
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="mobile-controls" class="hidden">
+    <!-- Left joystick zone -->
+    <div id="joystick-zone">
+      <div id="joystick-base"></div>
+      <div id="joystick-knob"></div>
+    </div>
+
+    <!-- Right look zone (right 55% of screen) -->
+    <div id="look-zone"></div>
+
+    <!-- Zoom buttons (visible when aiming) -->
+    <div id="zoom-buttons" class="hidden">
+      <button id="btn-zoom-in" class="mobile-btn">+</button>
+      <button id="btn-zoom-out" class="mobile-btn">−</button>
+    </div>
+
+    <!-- Right-side action buttons -->
+    <div id="mobile-actions">
+      <button id="btn-mobile-reload" class="mobile-btn">RELOAD</button>
+      <button id="btn-mobile-aim" class="mobile-btn">AIM</button>
+      <button id="btn-mobile-fire" class="mobile-btn fire-btn">FIRE</button>
+    </div>
+
+    <!-- Top-centre map toggle -->
+    <button id="btn-mobile-map" class="mobile-btn map-btn">MAP</button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       END SCREEN
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="end-screen" class="hidden">
+    <div id="end-content">
+      <div id="end-tier-badge">BRONZE</div>
+      <div id="end-title">HUNT COMPLETE</div>
+      <div id="end-score-wrap">
+        <div id="end-score-label">FINAL SCORE</div>
+        <div id="end-score-value">0</div>
+      </div>
+      <div id="end-stats">
+        <div class="stat-item">
+          <div class="stat-label">HITS</div>
+          <div class="stat-val" id="end-hits">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">MISSES</div>
+          <div class="stat-val" id="end-misses">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">ACCURACY</div>
+          <div class="stat-val" id="end-accuracy">0%</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">BEST COMBO</div>
+          <div class="stat-val" id="end-combo">×1</div>
+        </div>
+      </div>
+      <button id="btn-hunt-again" class="btn-primary">HUNT AGAIN</button>
+    </div>
+  </div>
+
+  <!-- Hit flash border (populated by hud.js) -->
+  <div id="hit-flash"></div>
+
+  <script type="module" src="js/game.js"></script>
+</body>
+</html>
