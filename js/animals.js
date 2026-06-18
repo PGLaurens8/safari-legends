@@ -23,6 +23,24 @@ const ADEFS = [
 const COMMON_DEFS = ADEFS.filter(d => d.rarity === 'common');
 const RARE_DEFS   = ADEFS.filter(d => d.rarity === 'rare');
 
+// ─── Model data: file + target world-unit height per species ─────────────────
+// normaliseScale = targetHeight / rawHeight is computed automatically at load.
+// def.scale is NOT used for GLTF models — only for procedural fallback meshes.
+// Ghost Rhino shares the hippo file but gets its own larger targetHeight.
+const MODEL_FILES = new Map([
+  ['Elephant',       { file: 'asian_elephant.glb',               targetHeight: 3.2 }],
+  ['Titan Elephant', { file: 'low_poly_elephant.glb',            targetHeight: 4.5 }],
+  ['Giraffe',        { file: 'download_low_poly_giraffe.glb',    targetHeight: 5.5 }],
+  ['Buffalo',        { file: 'low_poly_bison.glb',               targetHeight: 2.4 }],
+  ['Rhino',          { file: 'low_poly_angry_looking_hippo.glb', targetHeight: 1.8 }],
+  ['Ghost Rhino',    { file: 'low_poly_angry_looking_hippo.glb', targetHeight: 2.2 }],
+  ['Leopard',        { file: 'low_poly_gazelle.glb',             targetHeight: 1.5 }],
+  ['Zebra',          { file: 'sable_antelope_low_poly.glb',      targetHeight: 2.0 }],
+  ['Lion',           { file: 'ibex.glb',                         targetHeight: 1.6 }],
+  ['Warthog',        { file: 'low_poly_camel.glb',               targetHeight: 1.8 }],
+  ['Shadow Lion',    { file: '8th_dec_reindeer.glb',             targetHeight: 1.9 }],
+]);
+
 // Retained so respawn can add to scene
 let _scene = null;
 
@@ -34,31 +52,81 @@ const _gltfModels = new Map();
 // Active AnimationMixers — ticked every frame in updateAnimals
 const _mixers = [];
 
+// ─── logModelInfo — called after each successful GLTF load ───────────────────
+function logModelInfo(name, gltf, box) {
+  let meshCount = 0;
+  gltf.scene.traverse(c => { if (c.isMesh) meshCount++; });
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  console.log(
+    `[Model] ${name}: meshes=${meshCount}, anims=${gltf.animations.length}, ` +
+    `bbox=${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)}, ` +
+    `bottomY=${box.min.y.toFixed(3)}`
+  );
+}
+
 // ─── loadAnimalModels — try to load GLB files; silently fall back on 404 ──────
 export async function loadAnimalModels() {
   if (typeof THREE === 'undefined' || !THREE.GLTFLoader) return;
 
   const loader = new THREE.GLTFLoader();
 
-  const loads = COMMON_DEFS.map(def => {
-    const filename = def.name.toLowerCase().replace(/\s+/g, '') + '.glb';
-    const path     = `assets/models/${filename}`;
+  // Group species by filename so shared models (Rhino/Ghost Rhino) load once
+  const fileToNames = new Map();
+  for (const def of ADEFS) {
+    const entry = MODEL_FILES.get(def.name);
+    if (!entry) continue;
+    if (!fileToNames.has(entry.file)) fileToNames.set(entry.file, []);
+    fileToNames.get(entry.file).push(def.name);
+  }
 
-    return new Promise(resolve => {
+  const loads = [...fileToNames.entries()].map(([filename, names]) =>
+    new Promise(resolve => {
       loader.load(
-        path,
+        `assets/models/${filename}`,
         gltf => {
-          _gltfModels.set(def.name, {
-            scene:      gltf.scene,
-            animations: gltf.animations || [],
-          });
+          // Raw bbox of unmodified template (no scale, no position shift applied)
+          const rawBox    = new THREE.Box3().setFromObject(gltf.scene);
+          const rawSize   = new THREE.Vector3();
+          rawBox.getSize(rawSize);
+          const rawHeight = rawSize.y;
+          const rawMaxDim = Math.max(rawSize.x, rawSize.y, rawSize.z);
+          // Some models are exported flat (X/Z >> Y). Normalising by Y alone would
+          // produce a massive footprint. When the largest dimension is >3× the height,
+          // normalise by the largest dimension instead so the model fits sensibly.
+          const normDim   = rawMaxDim / rawHeight > 3.0 ? rawMaxDim : rawHeight;
+
+          // Per-species normalisation — Ghost Rhino gets a different targetHeight
+          // than Rhino even though both load from the same file.
+          // scaledBottomOffset = rawBox.min.y × normaliseScale
+          //   (world-space bottom of the mesh when positioned at origin with scale applied)
+          for (const name of names) {
+            const entry              = MODEL_FILES.get(name);
+            const targetHeight       = entry ? entry.targetHeight : 1.5;
+            const normaliseScale     = targetHeight / normDim;
+            const scaledBottomOffset = rawBox.min.y * normaliseScale;
+
+            console.log('[Normalised]', name,
+              'rawH:', rawHeight.toFixed(2),
+              'targetH:', targetHeight,
+              'scale:', normaliseScale.toFixed(4));
+
+            logModelInfo(name, gltf, rawBox);
+
+            _gltfModels.set(name, {
+              scene:               gltf.scene,
+              animations:          gltf.animations || [],
+              normaliseScale,      // mesh.scale.setScalar(normaliseScale) at spawn time
+              scaledBottomOffset,  // mesh.position.y = terrainY - scaledBottomOffset
+            });
+          }
           resolve();
         },
-        undefined,   // progress (unused)
+        undefined,      // progress (unused)
         () => resolve() // any error (404, parse fail) → silent fallback
       );
-    });
-  });
+    })
+  );
 
   await Promise.all(loads);
 }
@@ -89,27 +157,42 @@ export function spawnAnimals(scene) {
 // ─── placeAnimal — spawns one animal and pushes onto G.animals ────────────────
 export function placeAnimal(scene, def) {
   const half = WORLD / 2 - 12;
-  let x, z, attempts = 0;
+  let x, z, attempts = 0, tooClose;
   do {
     x = (Math.random() * 2 - 1) * half;
     z = (Math.random() * 2 - 1) * half;
     attempts++;
-  } while (Math.sqrt(x * x + z * z) < 15 && attempts < 60);
+    const dpx = x - G.px, dpz = z - G.pz;
+    const nearPlayer = (dpx * dpx + dpz * dpz) < 45 * 45;
+    const nearAnimal = G.animals.some(a => {
+      const dx = a.x - x, dz = a.z - z;
+      return dx * dx + dz * dz < 64; // 8-unit radius between animals
+    });
+    tooClose = nearPlayer || nearAnimal;
+  } while (tooClose && attempts < 60);
 
-  // If we exhausted attempts and still too close to origin, reject rather than spawn at invalid position
-  if (attempts >= 60 && Math.sqrt(x * x + z * z) < 15) return;
+  if (attempts >= 60 && tooClose) return;
 
   const y = getTerrainY(x, z);
 
   // Use GLTF model if loaded for this species, else procedural fallback
   let mesh;
   let mixer = null;
+  let meshBottomOffset = 0;
   const gltfData = _gltfModels.get(def.name);
 
   if (gltfData) {
     mesh = gltfData.scene.clone();
-    mesh.scale.setScalar(def.scale * 2.5);
+    // normaliseScale was computed at load time: targetHeight / rawHeight
+    // def.scale is intentionally NOT used for GLTF models.
+    mesh.scale.setScalar(gltfData.normaliseScale);
     mesh.name = def.name;
+
+    // Place feet on terrain: scaledBottomOffset = rawBox.min.y × normaliseScale
+    // mesh.position.y = terrainY - scaledBottomOffset puts the model bottom at terrainY
+    meshBottomOffset = gltfData.scaledBottomOffset;
+    mesh.position.set(x, y - meshBottomOffset, z);
+
     if (gltfData.animations.length > 0) {
       mixer = new THREE.AnimationMixer(mesh);
       mixer.clipAction(gltfData.animations[0]).play();
@@ -117,9 +200,9 @@ export function placeAnimal(scene, def) {
     }
   } else {
     mesh = makeAnimal(def);
+    mesh.position.set(x, y, z);
   }
 
-  mesh.position.set(x, y, z);
   scene.add(mesh);
 
   // Precompute base body Y for procedural animation (body = child[0])
@@ -141,7 +224,9 @@ export function placeAnimal(scene, def) {
     fleeAngleOffset: 0,
     bobT:        Math.random() * Math.PI * 2,
     baseBodyY,
-    mixer,        // null for procedural animals
+    mixer,             // null for procedural animals
+    useGltf:           !!gltfData,
+    meshBottomOffset,  // 0 for procedural; bottomOffset×scale for GLTF
     fleeSounded:  false,
     wounded:      false,
     woundedAt:    0,
@@ -452,10 +537,14 @@ export function updateAnimals(dt, camera) {
     // ── Animation ─────────────────────────────────────────────────────────
     a.bobT += dt * (fleeing ? 4.0 : 1.5);
 
+    let meshY = a.y;
     if (a.mixer) {
-      // GLTF animation — tick the mixer (speed up when fleeing)
+      // GLTF with animations — tick mixer, speed up when fleeing
       a.mixer.timeScale = fleeing ? 1.8 : 1.0;
       a.mixer.update(dt);
+    } else if (a.useGltf) {
+      // GLTF without animations — bob the root mesh vertically
+      meshY = a.y + Math.sin(a.bobT) * (fleeing ? 0.08 : 0.03) * a.scale;
     } else {
       // Procedural animation (makeAnimal mesh child order must stay consistent)
       const ch    = a.mesh.children;
@@ -478,7 +567,8 @@ export function updateAnimals(dt, camera) {
     }
 
     // ── Position + orient mesh ─────────────────────────────────────────────
-    a.mesh.position.set(a.x, a.y, a.z);
+    // meshBottomOffset is 0 for procedural meshes, so this formula is universal.
+    a.mesh.position.set(a.x, meshY - a.meshBottomOffset, a.z);
     a.mesh.rotation.y = -a.angle + Math.PI / 2;
     // Wounded limp: irregular lateral roll simulating leg injury
     a.mesh.rotation.z = a.wounded ? Math.sin(a.bobT * 3) * 0.15 : 0;
