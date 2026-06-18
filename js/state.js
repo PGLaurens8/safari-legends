@@ -84,6 +84,9 @@ export function resetG() {
   G.crouching    = false;
   G.crouchHeight = 1.8;
   G.rifleKickZ   = 0;
+
+  // Combo grace window — combo resets only after 1.5s without a kill
+  G.comboTimer = 0;
 }
 
 // Initialise on load so G is never undefined

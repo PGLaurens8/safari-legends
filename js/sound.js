@@ -61,29 +61,68 @@ function _ready() {
   return true;
 }
 
-// ─── playShot — muffled rifle crack ──────────────────────────────────────────
+// ─── playShot — rifle crack with bass thump ───────────────────────────────────
 export function playShot() {
   if (!_ready()) return;
 
   const now = _ctx.currentTime;
+
+  // High-frequency crack (noise layer)
   const src = _ctx.createBufferSource();
-  src.buffer             = _noiseBuffer(0.12);
-  src.playbackRate.value = 0.8 + Math.random() * 0.4; // slight pitch variance
+  src.buffer             = _noiseBuffer(0.15);
+  src.playbackRate.value = 0.8 + Math.random() * 0.4;
 
   const filter = _ctx.createBiquadFilter();
   filter.type            = 'lowpass';
-  filter.frequency.value = 600 + Math.random() * 400; // 600–1000 Hz
+  filter.frequency.value = 600 + Math.random() * 400;
 
-  const gain = _ctx.createGain();
-  gain.gain.setValueAtTime(0, now);
-  gain.gain.linearRampToValueAtTime(0.8, now + 0.005); // sharp attack
-  gain.gain.linearRampToValueAtTime(0, now + 0.08);    // decay over 80ms
+  const noiseGain = _ctx.createGain();
+  noiseGain.gain.setValueAtTime(0, now);
+  noiseGain.gain.linearRampToValueAtTime(0.8, now + 0.005);
+  noiseGain.gain.linearRampToValueAtTime(0, now + 0.08);
 
   src.connect(filter);
-  filter.connect(gain);
-  gain.connect(_masterGain);
+  filter.connect(noiseGain);
+  noiseGain.connect(_masterGain);
   src.start(now);
-  src.stop(now + 0.13);
+  src.stop(now + 0.15);
+
+  // Bass thump (body impact)
+  const bass = _ctx.createOscillator();
+  bass.type = 'sine';
+  bass.frequency.setValueAtTime(85, now);
+  bass.frequency.exponentialRampToValueAtTime(40, now + 0.08);
+
+  const bassGain = _ctx.createGain();
+  bassGain.gain.setValueAtTime(0, now);
+  bassGain.gain.linearRampToValueAtTime(0.5, now + 0.003);
+  bassGain.gain.linearRampToValueAtTime(0, now + 0.08);
+
+  bass.connect(bassGain);
+  bassGain.connect(_masterGain);
+  bass.start(now);
+  bass.stop(now + 0.09);
+
+  // Short noise tail burst (reverb simulation)
+  const tail = _ctx.createBufferSource();
+  tail.buffer             = _noiseBuffer(0.06);
+  tail.playbackRate.value = 0.4;
+
+  const tailFilter = _ctx.createBiquadFilter();
+  tailFilter.type            = 'bandpass';
+  tailFilter.frequency.value = 400;
+  tailFilter.Q.value         = 1.5;
+
+  const tailGain = _ctx.createGain();
+  tailGain.gain.setValueAtTime(0, now + 0.04);
+  tailGain.gain.linearRampToValueAtTime(0.25, now + 0.045);
+  tailGain.gain.linearRampToValueAtTime(0, now + 0.10);
+
+  tail.connect(tailFilter);
+  tailFilter.connect(tailGain);
+  tailGain.connect(_masterGain);
+  tail.start(now + 0.04);
+  tail.stop(now + 0.11);
 }
 
 // ─── playDryClick — empty chamber ─────────────────────────────────────────────
@@ -136,10 +175,11 @@ function _noiseBurst(delaySec, playbackRate, filterHz, peakGain) {
   src.stop(now + 0.10);
 }
 
-// ─── playAlertChirp — animal flee warning (800→400Hz sweep) ──────────────────
-export function playAlertChirp() {
+// ─── playAlertChirp — animal flee warning (800→400Hz sweep, falls off with distance)
+export function playAlertChirp(distance = 0) {
   if (!_ready()) return;
 
+  const vol = Math.max(0.02, 0.15 * (1 - distance / 80)); // quieter when far
   const now = _ctx.currentTime;
   const osc = _ctx.createOscillator();
   osc.type = 'sine';
@@ -147,7 +187,7 @@ export function playAlertChirp() {
   osc.frequency.exponentialRampToValueAtTime(400, now + 0.2);
 
   const gain = _ctx.createGain();
-  gain.gain.setValueAtTime(0.15, now);
+  gain.gain.setValueAtTime(vol, now);
   gain.gain.linearRampToValueAtTime(0, now + 0.22);
 
   osc.connect(gain);

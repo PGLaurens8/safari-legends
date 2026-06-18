@@ -29,6 +29,7 @@ export function initHUD() {
   $('combo-display')?.classList.add('hidden');
   $('reload-bar-wrap')?.classList.add('hidden');
   $('crouch-indicator')?.classList.add('hidden');
+  $('ammo-low')?.classList.add('hidden');
   document.querySelectorAll('.score-popup').forEach(el => el.remove());
 
   updateWindUI();
@@ -41,6 +42,7 @@ export function syncUI() {
   _syncAimMode();
   _syncCombo();
   _syncCrouch();
+  _syncAmmoWarning();
 
   const now = performance.now();
   if (now - _lastWindUpdate > 10000) {
@@ -86,6 +88,12 @@ function _syncCrouch() {
   const el = $('crouch-indicator');
   if (!el) return;
   el.classList.toggle('hidden', !G.crouching);
+}
+
+function _syncAmmoWarning() {
+  const el = $('ammo-low');
+  if (!el) return;
+  el.classList.toggle('hidden', G.ammo > 2 || G.isReloading);
 }
 
 // ─── updateScoreUI ────────────────────────────────────────────────────────────

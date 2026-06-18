@@ -7,11 +7,12 @@ import { playShot, playDryClick, playReloadClack, playWoundedSound } from './sou
 let _camera = null;
 let _rifle  = null; // camera child — built once, persists across restarts
 
-// ─── Reusable vectors — allocated once, never reallocated ────────────────────
+// ─── Reusable vectors + singletons — allocated once, never reallocated ────────
 const _fwd        = new THREE.Vector3();
 const _worldRight = new THREE.Vector3();
 const _kbdRight   = new THREE.Vector3();
 const _UP         = new THREE.Vector3(0, 1, 0);
+const _raycaster  = new THREE.Raycaster(); // reused every shot — no per-shot allocation
 
 // ─── _buildRifle — procedural rifle mesh attached to camera ──────────────────
 function _buildRifle(camera) {
@@ -43,11 +44,15 @@ function _buildRifle(camera) {
   scopeBody.position.set(0, 0.048, -0.06);
   rifle.add(scopeBody);
 
-  // Render in front of scene geometry; unaffected by fog depth
+  // Render in front of scene geometry; never culled or occluded
+  rifle.frustumCulled = false;
+  rifle.renderOrder   = 999;
   rifle.traverse(m => {
     if (m.isMesh) {
-      m.renderOrder      = 999;
-      m.material.depthTest = false;
+      m.renderOrder          = 999;
+      m.frustumCulled        = false;
+      m.material.depthTest   = false;
+      m.material.depthWrite  = false;
     }
   });
 
@@ -141,6 +146,12 @@ export function updatePlayer(dt, camera) {
   if (isMoving) G.stillTimer  = 0;
   else          G.stillTimer += dt;
 
+  // Combo grace window — reset combo only after 1.5s without a kill
+  if (G.comboTimer > 0) {
+    G.comboTimer -= dt;
+    if (G.comboTimer <= 0) { G.combo = 0; G.comboTimer = 0; }
+  }
+
   // Scope sway — delta approach avoids drift accumulation
   const prevSwayTime = G.swayTime;
   G.swayTime += dt;
@@ -158,9 +169,10 @@ export function updatePlayer(dt, camera) {
     camera.rotation.y += Math.sin(G.windAngle) * driftRate;
   }
 
-  // Recoil recovery — linear, restores 0.04 rad over 200ms
+  // Recoil recovery — crouching recovers faster (120ms vs 200ms)
   if (G.recoilOffset > 0) {
-    const recovery = Math.min(G.recoilOffset, (0.04 / 0.2) * dt);
+    const recoveryTime = G.crouching ? 0.12 : 0.2;
+    const recovery = Math.min(G.recoilOffset, (0.04 / recoveryTime) * dt);
     G.recoilOffset       -= recovery;
     camera.rotation.x    -= recovery;
   }
@@ -235,8 +247,7 @@ export function tryShoot(camera) {
   playShot(); // fired
 
   // Ray fired from pre-recoil camera direction (bullet travels where you aimed)
-  const ray = new THREE.Raycaster();
-  ray.setFromCamera(new THREE.Vector2(0, 0), camera);
+  _raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
 
   let hit = null;
   let hitDist = Infinity;
@@ -245,7 +256,7 @@ export function tryShoot(camera) {
     if (!animal.alive) continue;
     const box    = new THREE.Box3().setFromObject(animal.mesh);
     const target = new THREE.Vector3();
-    if (ray.ray.intersectBox(box, target)) {
+    if (_raycaster.ray.intersectBox(box, target)) {
       const d = camera.position.distanceTo(target);
       if (d < hitDist) { hitDist = d; hit = animal; }
     }
@@ -259,20 +270,25 @@ export function tryShoot(camera) {
     }
   } else {
     G.misses++;
-    G.combo = 0;
+    G.comboTimer = 1.5; // 1.5s grace — miss doesn't instantly break combo
   }
 
   if (G.ammo <= 0) startReload();
 
+  // Haptic feedback on mobile
+  navigator.vibrate?.([20, 10, 20]);
+
   // Feel effects — applied after hit detection so they don't skew the ray
-  G.shakeX        = (Math.random() - 0.5) * 0.16; // ±0.08 units
+  const recoilAmt = G.crouching ? 0.025 : 0.04; // crouching steadies the shot
+  const kickAmt   = G.crouching ? 0.04  : 0.06;
+  G.shakeX        = (Math.random() - 0.5) * 0.16;
   G.shakeY        = (Math.random() - 0.5) * 0.16;
   G.shakeDuration = 0.12;
 
-  G.recoilOffset    += 0.04;
-  camera.rotation.x += 0.04;
+  G.recoilOffset    += recoilAmt;
+  camera.rotation.x += recoilAmt;
   camera.rotation.x  = Math.max(-1.1, Math.min(1.1, camera.rotation.x));
-  G.rifleKickZ      += 0.06;
+  G.rifleKickZ      += kickAmt;
 
   spawnMuzzleFlash();
   spawnHitFlash();
@@ -284,7 +300,7 @@ function _doWound(animal) {
   // Force immediate panic flee with random angle offset
   animal.state          = 'flee';
   animal.fleeT          = 999;
-  animal.fleeAngleOffset = (Math.random() - 0.5);
+  animal.fleeAngleOffset = (Math.random() - 0.5) * 1.4;
   playWoundedSound();
   // No score, no combo change — wound is a partial hit
 }

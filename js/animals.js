@@ -96,6 +96,9 @@ export function placeAnimal(scene, def) {
     attempts++;
   } while (Math.sqrt(x * x + z * z) < 15 && attempts < 60);
 
+  // If we exhausted attempts and still too close to origin, reject rather than spawn at invalid position
+  if (attempts >= 60 && Math.sqrt(x * x + z * z) < 15) return;
+
   const y = getTerrainY(x, z);
 
   // Use GLTF model if loaded for this species, else procedural fallback
@@ -341,9 +344,9 @@ export function updateAnimals(dt, camera) {
     }
   }
 
-  // Track live count as a mutable variable so multiple respawns in one frame
-  // don't each see the same stale count and overshoot the 30-animal cap.
-  let liveCount = G.animals.filter(a => a.alive).length;
+  // Track live count — for-loop avoids Array allocation each frame
+  let liveCount = 0;
+  for (let i = 0; i < G.animals.length; i++) { if (G.animals[i].alive) liveCount++; }
 
   for (const a of toRemove) {
     if (a.mixer) {
@@ -388,15 +391,31 @@ export function updateAnimals(dt, camera) {
         a.angle   = Math.random() * Math.PI * 2;
         a.wanderT = 2 + Math.random() * 4;
       }
-      // Begin fleeing when player is within 20 units
+      // Wind-aware detection: player scent travels downwind
+      // Animals downwind smell player from 40 units; upwind only 12 units
       const dx = a.x - px, dz = a.z - pz;
-      if (dx * dx + dz * dz < 400) { // 20² = 400
+      const distSq = dx * dx + dz * dz;
+      const dist   = Math.sqrt(distSq);
+      const windDx = Math.cos(G.windAngle), windDz = Math.sin(G.windAngle);
+      const dot    = dist > 0 ? (dx / dist) * windDx + (dz / dist) * windDz : 0;
+      const detectRange = 12 + (dot + 1) * 0.5 * 28; // 12 (upwind) → 40 (downwind)
+      if (distSq < detectRange * detectRange) {
         a.state           = 'flee';
         a.fleeT           = 5 + Math.random() * 3;
-        a.fleeAngleOffset = (Math.random() - 0.5);
+        a.fleeAngleOffset = (Math.random() - 0.5) * 1.4; // ±0.7 rad scatter
         if (!a.fleeSounded) {
-          playAlertChirp();
+          playAlertChirp(dist);
           a.fleeSounded = true;
+        }
+        // Herd cascade: nearby animals panic-flee together
+        for (const other of G.animals) {
+          if (other === a || !other.alive || other.state === 'flee' || other.wounded) continue;
+          const odx = other.x - a.x, odz = other.z - a.z;
+          if (odx * odx + odz * odz < 900) { // 30 units
+            other.state           = 'flee';
+            other.fleeT           = 5 + Math.random() * 3;
+            other.fleeAngleOffset = (Math.random() - 0.5) * 1.4;
+          }
         }
       }
     } else { // flee

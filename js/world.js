@@ -1,12 +1,13 @@
-import { WORLD } from './state.js';
+import { WORLD, G } from './state.js';
 
 let _built = false;
 
 // ─── Day/night state ──────────────────────────────────────────────────────────
-let _sun     = null; // DirectionalLight ref
-let _ambient = null; // AmbientLight ref
-let _scene   = null; // scene ref for background + fog updates
-let _dayTime = 0.0;  // 0=dawn, 0.5=noon, 1.0=dusk; wraps at 1
+let _sun       = null; // DirectionalLight ref
+let _ambient   = null; // AmbientLight ref
+let _scene     = null; // scene ref for background + fog updates
+let _sunSphere = null; // visible sun disc — tracks _sun.position each frame
+let _dayTime   = 0.0;  // 0=dawn, 0.5=noon, 1.0=dusk; wraps at 1
 
 // Reusable Color instances — updated in place each frame to avoid GC churn
 const _skyColDawn = new THREE.Color('#e8541a');
@@ -125,14 +126,13 @@ function buildSky(scene) {
   sky.name = 'sky';
   scene.add(sky);
 
-  // Sun disc
-  const sunMesh = new THREE.Mesh(
+  // Sun disc — position is updated each frame in updateDayNight to track the light
+  _sunSphere = new THREE.Mesh(
     new THREE.SphereGeometry(16, 16, 8),
     new THREE.MeshBasicMaterial({ color: 0xffe060 })
   );
-  sunMesh.position.set(310, 270, -200);
-  sunMesh.name = 'sunSphere';
-  scene.add(sunMesh);
+  _sunSphere.name = 'sunSphere';
+  scene.add(_sunSphere);
 }
 
 // ── Acacia trees (85) ─────────────────────────────────────────────────────────
@@ -261,13 +261,23 @@ export function updateDayNight(dt) {
 
   // Fog colour tracks sky so horizon blends naturally
   _scene.fog.color.copy(_bgColor).multiplyScalar(0.7);
+
+  // Sun disc tracks light direction (normalize + project to ~700 unit radius)
+  if (_sunSphere) {
+    const d = _sun.position.length();
+    _sunSphere.position.copy(_sun.position).multiplyScalar(700 / d);
+  }
 }
 
 // ─── updateWorld — animate grass sway each frame ──────────────────────────────
 export function updateWorld(dt) {
   _worldTime += dt;
+  // Wind speed (2–20 km/h) maps to sway frequency and amplitude
+  const windFactor = G.windSpeed / 10; // ~0.2–2.0
+  const freq = 1.2 * windFactor;
+  const amp  = 0.08 + 0.07 * windFactor; // 0.09–0.22 rad
   for (const g of grassMeshes) {
-    g.rotation.z = Math.sin(_worldTime * 1.2 + g.position.x * 0.1) * 0.15;
+    g.rotation.z = Math.sin(_worldTime * freq + g.position.x * 0.1) * amp;
   }
 }
 

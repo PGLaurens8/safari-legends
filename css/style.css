@@ -628,6 +628,19 @@ button {
   box-shadow: none;
 }
 
+#ammo-low {
+  font-size: 0.55rem;
+  letter-spacing: 0.18em;
+  color: #e8541a;
+  text-transform: uppercase;
+  animation: ammo-pulse 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes ammo-pulse {
+  from { opacity: 1; }
+  to   { opacity: 0.35; }
+}
+
 /* ── Timer bar (bottom edge) ─────────────────────────────────────────────── */
 #timer-bar-track {
   position: absolute;
