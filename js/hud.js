@@ -28,6 +28,7 @@ export function initHUD() {
   }
   $('combo-display')?.classList.add('hidden');
   $('reload-bar-wrap')?.classList.add('hidden');
+  $('crouch-indicator')?.classList.add('hidden');
   document.querySelectorAll('.score-popup').forEach(el => el.remove());
 
   updateWindUI();
@@ -39,6 +40,7 @@ export function syncUI() {
   updateAmmoUI();
   _syncAimMode();
   _syncCombo();
+  _syncCrouch();
 
   const now = performance.now();
   if (now - _lastWindUpdate > 10000) {
@@ -78,6 +80,12 @@ function _syncCombo() {
   } else {
     el.classList.add('hidden');
   }
+}
+
+function _syncCrouch() {
+  const el = $('crouch-indicator');
+  if (!el) return;
+  el.classList.toggle('hidden', !G.crouching);
 }
 
 // ─── updateScoreUI ────────────────────────────────────────────────────────────
@@ -124,13 +132,13 @@ export function updateWindUI() {
 }
 
 // ─── showAlert ───────────────────────────────────────────────────────────────
-export function showAlert(name, pts) {
+export function showAlert(name, pts, isCleanKill = false) {
   const bar    = $('alert-bar');
   const nameEl = $('alert-animal');
   const ptEl   = $('alert-points');
   if (!bar) return;
 
-  nameEl.textContent = name.toUpperCase();
+  nameEl.textContent = isCleanKill ? `CLEAN KILL — ${name.toUpperCase()}` : name.toUpperCase();
   ptEl.textContent   = `+${pts}`;
 
   bar.style.animation = 'none';
@@ -156,11 +164,11 @@ export function showCombo(n) {
 }
 
 // ─── spawnScorePopup ─────────────────────────────────────────────────────────
-export function spawnScorePopup(pts, isRare, isCombo) {
+export function spawnScorePopup(pts, isRare, isCombo, isWoundedKill = false) {
   const el = document.createElement('div');
   el.className   = 'score-popup';
-  el.textContent = `+${pts}`;
-  if (isRare || isCombo) el.style.color = '#e8541a';
+  el.textContent = isWoundedKill ? `+${pts} WOUNDED BONUS` : `+${pts}`;
+  if (isRare || isCombo || isWoundedKill) el.style.color = '#e8541a';
   el.style.left = `${46 + (Math.random() * 8 - 4)}%`;
   el.style.top  = `${42 + (Math.random() * 8 - 4)}%`;
   document.body.appendChild(el);
@@ -174,6 +182,15 @@ export function spawnHitFlash() {
   el.classList.remove('flash');
   void el.offsetWidth; // reflow to restart CSS animation
   el.classList.add('flash');
+}
+
+// ─── spawnMuzzleFlash ─────────────────────────────────────────────────────────
+export function spawnMuzzleFlash() {
+  const el = $('muzzle-flash');
+  if (!el) return;
+  el.classList.remove('muzzle-lit');
+  void el.offsetWidth; // reflow to restart CSS animation
+  el.classList.add('muzzle-lit');
 }
 
 // ─── drawMinimap ─────────────────────────────────────────────────────────────
@@ -319,19 +336,29 @@ export function drawMapOverlay(scene, camera) {
   ctx.textAlign = 'center';
   ctx.font      = '9px Oswald, sans-serif';
 
+  const mapPulse = 0.5 + 0.5 * Math.sin(performance.now() / 200); // 2.5Hz pulse
+
   for (const a of G.animals) {
     if (!a.alive) continue;
     const ax     = mx(a.x), ay = my(a.z);
     const isRare = a.rarity === 'rare';
 
-    ctx.fillStyle = isRare ? '#ff40ff' : '#e8541a';
-    ctx.beginPath();
-    ctx.arc(ax, ay, isRare ? 5 : 4, 0, Math.PI * 2);
-    ctx.fill();
+    if (a.wounded) {
+      // Pulsing red dot for wounded animals
+      ctx.fillStyle = `rgba(220, 30, 30, ${0.55 + mapPulse * 0.45})`;
+      ctx.beginPath();
+      ctx.arc(ax, ay, 3.5 + mapPulse * 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = isRare ? '#ff40ff' : '#e8541a';
+      ctx.beginPath();
+      ctx.arc(ax, ay, isRare ? 5 : 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     const dx = a.x - G.px, dz = a.z - G.pz;
     if (dx * dx + dz * dz < labelDist2) {
-      ctx.fillStyle = isRare ? '#ff80ff' : '#f5edd6';
+      ctx.fillStyle = a.wounded ? '#ff6060' : (isRare ? '#ff80ff' : '#f5edd6');
       ctx.fillText(a.name, ax, ay - 7);
     }
   }

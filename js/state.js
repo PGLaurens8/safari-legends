@@ -69,6 +69,21 @@ export function resetG() {
 
   // RAF handle
   G.rafId = null;
+
+  // Feel upgrades — screen shake
+  G.shakeX        = 0;
+  G.shakeY        = 0;
+  G.shakeDuration = 0;
+
+  // Feel upgrades — scope sway + recoil
+  G.swayTime     = 0;
+  G.stillTimer   = 0;
+  G.recoilOffset = 0;
+
+  // Crouch + rifle
+  G.crouching    = false;
+  G.crouchHeight = 1.8;
+  G.rifleKickZ   = 0;
 }
 
 // Initialise on load so G is never undefined

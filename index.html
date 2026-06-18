@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/style.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 </head>
 <body>
 
@@ -190,9 +191,10 @@
       <span id="wind-speed">4 km/h</span>
     </div>
 
-    <!-- Bottom-left: map toggle button (FPS) -->
+    <!-- Bottom-left: map toggle button (FPS) + crouch indicator -->
     <div id="hud-bottom-left">
       <button id="btn-map-toggle" class="hud-btn">MAP &#8644; FPS</button>
+      <div id="crouch-indicator" class="hidden">CROUCHED</div>
     </div>
 
     <!-- Bottom-centre: reload bar -->
@@ -210,6 +212,9 @@
         <!-- Populated by hud.js -->
       </div>
     </div>
+
+    <!-- Muzzle flash (bottom-centre, managed by hud.js) -->
+    <div id="muzzle-flash"></div>
 
     <!-- Bottom edge: timer bar -->
     <div id="timer-bar-track">

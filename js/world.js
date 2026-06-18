@@ -2,6 +2,22 @@ import { WORLD } from './state.js';
 
 let _built = false;
 
+// ─── Day/night state ──────────────────────────────────────────────────────────
+let _sun     = null; // DirectionalLight ref
+let _ambient = null; // AmbientLight ref
+let _scene   = null; // scene ref for background + fog updates
+let _dayTime = 0.0;  // 0=dawn, 0.5=noon, 1.0=dusk; wraps at 1
+
+// Reusable Color instances — updated in place each frame to avoid GC churn
+const _skyColDawn = new THREE.Color('#e8541a');
+const _skyColNoon = new THREE.Color('#88bb52');
+const _skyColDusk = new THREE.Color('#c8601a');
+const _bgColor    = new THREE.Color('#e8541a');
+
+// ─── Grass sway state ─────────────────────────────────────────────────────────
+let _worldTime = 0;
+export const grassMeshes = [];
+
 // ─── Terrain height — authoritative for mesh, player, and animals ─────────────
 // Includes origin-area flattening (radius 30) so all systems stay in sync.
 export function getTerrainY(x, z) {
@@ -20,6 +36,9 @@ export function getTerrainY(x, z) {
 export function buildWorld(scene) {
   if (_built) return;
   _built = true;
+
+  _scene = scene;
+  scene.background = _bgColor; // day/night updates _bgColor in place
 
   buildTerrain(scene);
   buildLights(scene);
@@ -66,20 +85,21 @@ function buildTerrain(scene) {
 
 // ── Lights ────────────────────────────────────────────────────────────────────
 function buildLights(scene) {
-  const sun = new THREE.DirectionalLight(0xfff0cc, 2.4);
-  sun.position.set(100, 160, 80);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.near   = 0.5;
-  sun.shadow.camera.far    = 800;
-  sun.shadow.camera.left   = -220;
-  sun.shadow.camera.right  =  220;
-  sun.shadow.camera.top    =  220;
-  sun.shadow.camera.bottom = -220;
-  sun.shadow.bias = -0.001;
-  scene.add(sun);
+  _sun = new THREE.DirectionalLight(0xfff0cc, 2.4);
+  _sun.position.set(100, 160, 80);
+  _sun.castShadow = true;
+  _sun.shadow.mapSize.set(2048, 2048);
+  _sun.shadow.camera.near   = 0.5;
+  _sun.shadow.camera.far    = 800;
+  _sun.shadow.camera.left   = -220;
+  _sun.shadow.camera.right  =  220;
+  _sun.shadow.camera.top    =  220;
+  _sun.shadow.camera.bottom = -220;
+  _sun.shadow.bias = -0.001;
+  scene.add(_sun);
 
-  scene.add(new THREE.AmbientLight(0x405a28, 1.3));
+  _ambient = new THREE.AmbientLight(0x405a28, 1.3);
+  scene.add(_ambient);
 
   const fill = new THREE.DirectionalLight(0x6090ff, 0.35);
   fill.position.set(-60, 40, -90);
@@ -214,6 +234,40 @@ function buildGrass(scene) {
     mesh.rotation.y = Math.random() * Math.PI;
     mesh.name = 'grass';
     scene.add(mesh);
+    grassMeshes.push(mesh);
+  }
+}
+
+// ─── updateDayNight — advance day/night cycle, update lights + sky ────────────
+export function updateDayNight(dt) {
+  if (!_sun || !_ambient || !_scene) return;
+
+  _dayTime = (_dayTime + dt / 300) % 1.0; // full cycle in 300s (5 minutes)
+
+  // Sun position (arc across sky)
+  _sun.position.x = Math.sin(_dayTime * Math.PI) * 200;
+  _sun.position.y = Math.cos(_dayTime * Math.PI * 0.5 + 0.3) * 160 + 40;
+  // z stays at initial value (80) — sun moves in X/Y plane overhead
+
+  // Ambient intensity: peaks at noon (1.3), dips at dawn/dusk (0.6)
+  _ambient.intensity = 0.6 + 0.7 * Math.sin(_dayTime * Math.PI);
+
+  // Sky colour: dawn → noon → dusk
+  if (_dayTime < 0.5) {
+    _bgColor.lerpColors(_skyColDawn, _skyColNoon, _dayTime * 2);
+  } else {
+    _bgColor.lerpColors(_skyColNoon, _skyColDusk, (_dayTime - 0.5) * 2);
+  }
+
+  // Fog colour tracks sky so horizon blends naturally
+  _scene.fog.color.copy(_bgColor).multiplyScalar(0.7);
+}
+
+// ─── updateWorld — animate grass sway each frame ──────────────────────────────
+export function updateWorld(dt) {
+  _worldTime += dt;
+  for (const g of grassMeshes) {
+    g.rotation.z = Math.sin(_worldTime * 1.2 + g.position.x * 0.1) * 0.15;
   }
 }
 

@@ -1,12 +1,13 @@
 import { G, resetG, HUNT_TIME } from './state.js';
-import { buildWorld, getTerrainY } from './world.js';
+import { buildWorld, getTerrainY, updateDayNight, updateWorld } from './world.js';
 
 // ─── Optional module refs (filled by loadModules) ─────────────────────────────
-let initPlayer     = null;
-let updatePlayer   = null;
-let spawnAnimals   = null;
-let updateAnimals  = null;
-let initInput      = null;
+let initPlayer        = null;
+let updatePlayer      = null;
+let spawnAnimals      = null;
+let updateAnimals     = null;
+let loadAnimalModels  = null;
+let initInput         = null;
 let syncUI         = null;
 let drawMinimap    = null;
 let drawMapOverlay = null;
@@ -24,8 +25,9 @@ async function loadModules() {
 
   try {
     const m = await import('./animals.js');
-    spawnAnimals  = m.spawnAnimals  || null;
-    updateAnimals = m.updateAnimals || null;
+    spawnAnimals     = m.spawnAnimals     || null;
+    updateAnimals    = m.updateAnimals    || null;
+    loadAnimalModels = m.loadAnimalModels || null;
   } catch (_) {}
 
   try {
@@ -86,6 +88,10 @@ function loop(now) {
   const dt = Math.min((now - lastTime) / 1000, 0.1);
   lastTime = now;
 
+  // World updates run always — visible on title, map, and FPS screens
+  updateDayNight(dt);
+  updateWorld(dt);
+
   if (G.running) {
     if (updatePlayer)  updatePlayer(dt, camera, scene);
     if (updateAnimals) updateAnimals(dt, camera);
@@ -101,7 +107,7 @@ function loop(now) {
 }
 
 // ─── Hunt lifecycle ───────────────────────────────────────────────────────────
-function startHunt() {
+async function startHunt() {
   if (G.rafId) cancelAnimationFrame(G.rafId);
   clearInterval(G.timerInterval);
 
@@ -114,9 +120,10 @@ function startHunt() {
   camera.position.set(G.px, G.py, G.pz);
   camera.rotation.set(0, 0, 0);
 
-  if (initHUD)      initHUD();
-  if (initPlayer)   initPlayer(camera, scene);
-  if (spawnAnimals) spawnAnimals(scene);
+  if (initHUD)           initHUD();
+  if (initPlayer)        initPlayer(camera, scene);
+  if (loadAnimalModels)  await loadAnimalModels();
+  if (spawnAnimals)      spawnAnimals(scene);
   if (initAudio)    initAudio();
 
   G.running = true;

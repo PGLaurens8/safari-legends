@@ -26,18 +26,57 @@ const RARE_DEFS   = ADEFS.filter(d => d.rarity === 'rare');
 // Retained so respawn can add to scene
 let _scene = null;
 
+// ─── GLTF model store ─────────────────────────────────────────────────────────
+// Populated by loadAnimalModels(). Key = species name (matches def.name).
+// Value = { scene: THREE.Object3D, animations: THREE.AnimationClip[] }
+const _gltfModels = new Map();
+
+// Active AnimationMixers — ticked every frame in updateAnimals
+const _mixers = [];
+
+// ─── loadAnimalModels — try to load GLB files; silently fall back on 404 ──────
+export async function loadAnimalModels() {
+  if (typeof THREE === 'undefined' || !THREE.GLTFLoader) return;
+
+  const loader = new THREE.GLTFLoader();
+
+  const loads = COMMON_DEFS.map(def => {
+    const filename = def.name.toLowerCase().replace(/\s+/g, '') + '.glb';
+    const path     = `assets/models/${filename}`;
+
+    return new Promise(resolve => {
+      loader.load(
+        path,
+        gltf => {
+          _gltfModels.set(def.name, {
+            scene:      gltf.scene,
+            animations: gltf.animations || [],
+          });
+          resolve();
+        },
+        undefined,   // progress (unused)
+        () => resolve() // any error (404, parse fail) → silent fallback
+      );
+    });
+  });
+
+  await Promise.all(loads);
+}
+
 // ─── spawnAnimals ─────────────────────────────────────────────────────────────
 export function spawnAnimals(scene) {
   _scene = scene;
 
-  // Dispose and remove any existing animal meshes
+  // Dispose and remove any existing animal meshes + stop their mixers
   for (const a of G.animals) {
+    if (a.mixer) a.mixer.stopAllAction();
     if (a.mesh && a.mesh.parent) {
       _disposeMesh(a.mesh);
       a.mesh.parent.remove(a.mesh);
     }
   }
   G.animals.length = 0;
+  _mixers.length   = 0;
 
   for (let i = 0; i < ANIMAL_COUNT; i++) {
     const isRare = Math.random() < 0.08;
@@ -57,14 +96,32 @@ export function placeAnimal(scene, def) {
     attempts++;
   } while (Math.sqrt(x * x + z * z) < 15 && attempts < 60);
 
-  const y    = getTerrainY(x, z);
-  const mesh = makeAnimal(def);
+  const y = getTerrainY(x, z);
+
+  // Use GLTF model if loaded for this species, else procedural fallback
+  let mesh;
+  let mixer = null;
+  const gltfData = _gltfModels.get(def.name);
+
+  if (gltfData) {
+    mesh = gltfData.scene.clone();
+    mesh.scale.setScalar(def.scale * 2.5);
+    mesh.name = def.name;
+    if (gltfData.animations.length > 0) {
+      mixer = new THREE.AnimationMixer(mesh);
+      mixer.clipAction(gltfData.animations[0]).play();
+      _mixers.push(mixer);
+    }
+  } else {
+    mesh = makeAnimal(def);
+  }
+
   mesh.position.set(x, y, z);
   scene.add(mesh);
 
-  // Precompute base body Y for animation (body = child[0])
-  const lh       = 0.75 * def.scale;
-  const bh       = 0.8  * def.scale;
+  // Precompute base body Y for procedural animation (body = child[0])
+  const lh        = 0.75 * def.scale;
+  const bh        = 0.8  * def.scale;
   const baseBodyY = lh + bh / 2;
 
   G.animals.push({
@@ -79,9 +136,13 @@ export function placeAnimal(scene, def) {
     wanderT:         2 + Math.random() * 4,
     fleeT:           0,
     fleeAngleOffset: 0,
-    bobT:        Math.random() * Math.PI * 2, // stagger phases
+    bobT:        Math.random() * Math.PI * 2,
     baseBodyY,
-    fleeSounded: false, // prevents duplicate chirp per flee event
+    mixer,        // null for procedural animals
+    fleeSounded:  false,
+    wounded:      false,
+    woundedAt:    0,
+    woundTinted:  false,
     alive:  true,
     deadAt: 0,
     mesh,
@@ -285,6 +346,11 @@ export function updateAnimals(dt, camera) {
   let liveCount = G.animals.filter(a => a.alive).length;
 
   for (const a of toRemove) {
+    if (a.mixer) {
+      a.mixer.stopAllAction();
+      const mi = _mixers.indexOf(a.mixer);
+      if (mi !== -1) _mixers.splice(mi, 1);
+    }
     if (a.mesh && a.mesh.parent) {
       _disposeMesh(a.mesh);
       a.mesh.parent.remove(a.mesh);
@@ -303,10 +369,20 @@ export function updateAnimals(dt, camera) {
   for (const a of G.animals) {
     if (!a.alive) continue;
 
-    const fleeing = a.state === 'flee';
+    const fleeing = a.state === 'flee' || a.wounded;
+
+    // ── Wound tint — applied once when first wounded ───────────────────────
+    if (a.wounded && !a.woundTinted) {
+      _applyWoundTint(a.mesh);
+      a.woundTinted = true;
+    }
 
     // ── AI state machine ──────────────────────────────────────────────────
-    if (a.state === 'wander') {
+    if (a.wounded) {
+      // Panic flee: always track player, no wander recovery
+      const dx = a.x - px, dz = a.z - pz;
+      a.angle = Math.atan2(dz, dx) + a.fleeAngleOffset;
+    } else if (a.state === 'wander') {
       a.wanderT -= dt;
       if (a.wanderT <= 0) {
         a.angle   = Math.random() * Math.PI * 2;
@@ -336,7 +412,7 @@ export function updateAnimals(dt, camera) {
     }
 
     // ── Move ──────────────────────────────────────────────────────────────
-    const spd = a.speed * (fleeing ? 1.8 : 0.28);
+    const spd = a.speed * (a.wounded ? 2.2 : (fleeing ? 1.8 : 0.28));
     const nx  = a.x + Math.cos(a.angle) * spd * dt;
     const nz  = a.z + Math.sin(a.angle) * spd * dt;
 
@@ -357,31 +433,47 @@ export function updateAnimals(dt, camera) {
     // ── Animation ─────────────────────────────────────────────────────────
     a.bobT += dt * (fleeing ? 4.0 : 1.5);
 
-    const ch    = a.mesh.children;
-    const body  = ch[0];
-    const legFL = ch[1];
-    const legFR = ch[2];
-    const legBL = ch[3];
-    const legBR = ch[4];
-    const tail  = ch[ch.length - 1];
+    if (a.mixer) {
+      // GLTF animation — tick the mixer (speed up when fleeing)
+      a.mixer.timeScale = fleeing ? 1.8 : 1.0;
+      a.mixer.update(dt);
+    } else {
+      // Procedural animation (makeAnimal mesh child order must stay consistent)
+      const ch    = a.mesh.children;
+      const body  = ch[0];
+      const legFL = ch[1];
+      const legFR = ch[2];
+      const legBL = ch[3];
+      const legBR = ch[4];
+      const tail  = ch[ch.length - 1];
 
-    // Body bob
-    body.position.y = a.baseBodyY + Math.sin(a.bobT) * (fleeing ? 0.06 : 0.02) * a.scale;
+      body.position.y = a.baseBodyY + Math.sin(a.bobT) * (fleeing ? 0.06 : 0.02) * a.scale;
 
-    // Alternating leg swing: FL+BR together, FR+BL opposite
-    const swing = Math.sin(a.bobT) * (fleeing ? 0.45 : 0.15);
-    legFL.rotation.x =  swing;
-    legBR.rotation.x =  swing;
-    legFR.rotation.x = -swing;
-    legBL.rotation.x = -swing;
+      const swing = Math.sin(a.bobT) * (fleeing ? 0.45 : 0.15);
+      legFL.rotation.x =  swing;
+      legBR.rotation.x =  swing;
+      legFR.rotation.x = -swing;
+      legBL.rotation.x = -swing;
 
-    // Tail wag
-    tail.rotation.z = Math.PI / 3 + Math.sin(a.bobT * 2) * 0.3;
+      tail.rotation.z = Math.PI / 3 + Math.sin(a.bobT * 2) * 0.3;
+    }
 
     // ── Position + orient mesh ─────────────────────────────────────────────
     a.mesh.position.set(a.x, a.y, a.z);
     a.mesh.rotation.y = -a.angle + Math.PI / 2;
+    // Wounded limp: irregular lateral roll simulating leg injury
+    a.mesh.rotation.z = a.wounded ? Math.sin(a.bobT * 3) * 0.15 : 0;
   }
+}
+
+// ─── Wound tint — lerp all material colors 40% toward red ────────────────────
+function _applyWoundTint(mesh) {
+  const red = new THREE.Color(1, 0, 0);
+  mesh.traverse(child => {
+    if (child.isMesh && child.material && child.material.color) {
+      child.material.color.lerp(red, 0.4);
+    }
+  });
 }
 
 // ─── Mesh disposal ────────────────────────────────────────────────────────────

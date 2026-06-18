@@ -156,6 +156,26 @@ export function playAlertChirp() {
   osc.stop(now + 0.26);
 }
 
+// ─── playWoundedSound — low distressed tone, 200Hz → 80Hz over 300ms ─────────
+export function playWoundedSound() {
+  if (!_ready()) return;
+
+  const now = _ctx.currentTime;
+  const osc = _ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(200, now);
+  osc.frequency.exponentialRampToValueAtTime(80, now + 0.3);
+
+  const gain = _ctx.createGain();
+  gain.gain.setValueAtTime(0.2, now);
+  gain.gain.linearRampToValueAtTime(0, now + 0.35);
+
+  osc.connect(gain);
+  gain.connect(_masterGain);
+  osc.start(now);
+  osc.stop(now + 0.38);
+}
+
 // ─── toggleMute ───────────────────────────────────────────────────────────────
 export function toggleMute() {
   G.muted = !G.muted;

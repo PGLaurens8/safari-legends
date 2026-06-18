@@ -541,6 +541,19 @@ button {
 
 .hud-btn:hover { background: rgba(200, 146, 42, 0.15); }
 
+#crouch-indicator {
+  margin-top: 6px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: rgba(245, 237, 214, 0.65);
+  background: rgba(5, 10, 3, 0.55);
+  padding: 3px 8px;
+  border-left: 2px solid rgba(200, 146, 42, 0.55);
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
 /* ── Reload bar ──────────────────────────────────────────────────────────── */
 #reload-bar-wrap {
   position: absolute;
@@ -904,6 +917,31 @@ button {
 @keyframes flash-fade {
   0%   { border-color: rgba(232, 84, 26, 0.7); }
   100% { border-color: rgba(232, 84, 26, 0); }
+}
+
+/* ─── Muzzle flash ───────────────────────────────────────────────────────── */
+#muzzle-flash {
+  position: absolute;
+  bottom: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 210, 100, 0.95) 0%, rgba(232, 84, 26, 0.7) 45%, transparent 72%);
+  pointer-events: none;
+  opacity: 0;
+  z-index: 60;
+}
+
+#muzzle-flash.muzzle-lit {
+  animation: muzzle-pop 0.06s ease-out forwards;
+}
+
+@keyframes muzzle-pop {
+  0%   { opacity: 1; transform: translateX(-50%) scale(1.5); }
+  60%  { opacity: 0.6; transform: translateX(-50%) scale(1.0); }
+  100% { opacity: 0; transform: translateX(-50%) scale(0.5); }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
