@@ -30,13 +30,18 @@ const RARE_DEFS   = ADEFS.filter(d => d.rarity === 'rare');
 const MODEL_FILES = new Map([
   ['Elephant',       { file: 'asian_elephant.glb',               targetHeight: 3.2 }],
   ['Titan Elephant', { file: 'low_poly_elephant.glb',            targetHeight: 4.5 }],
-  ['Giraffe',        { file: 'download_low_poly_giraffe.glb',    targetHeight: 5.5 }],
+  // download_low_poly_giraffe.glb omitted — same baked root-motion issue as the
+  // sable; also scaled 5.8× making any offset error very visible. Giraffe uses
+  // the procedural neck+head mesh which correctly follows terrain and AI.
   ['Buffalo',        { file: 'low_poly_bison.glb',               targetHeight: 2.4 }],
   ['Rhino',          { file: 'low_poly_angry_looking_hippo.glb', targetHeight: 1.8 }],
   ['Ghost Rhino',    { file: 'low_poly_angry_looking_hippo.glb', targetHeight: 2.2 }],
-  ['Leopard',        { file: 'low_poly_gazelle.glb',             targetHeight: 1.5 }],
-  ['Zebra',          { file: 'sable_antelope_low_poly.glb',      targetHeight: 2.0 }],
-  ['Lion',           { file: 'ibex.glb',                         targetHeight: 1.6 }],
+  // low_poly_gazelle.glb omitted — model is exported flat (bbox 137×36×139),
+  // unusable as a standing animal; falls back to procedural Leopard mesh.
+  // sable_antelope_low_poly.glb omitted — baked root-motion tracks snap the
+  // Armature to world origin every frame, pinning the model at the player spawn.
+  // Zebra falls back to the procedural striped mesh with working leg animation.
+  ['Lion',           { file: 'ibex.glb',                         targetHeight: 1.3 }],
   ['Warthog',        { file: 'low_poly_camel.glb',               targetHeight: 1.8 }],
   ['Shadow Lion',    { file: '8th_dec_reindeer.glb',             targetHeight: 1.9 }],
 ]);
@@ -96,15 +101,38 @@ export async function loadAnimalModels() {
           // normalise by the largest dimension instead so the model fits sensibly.
           const normDim   = rawMaxDim / rawHeight > 3.0 ? rawMaxDim : rawHeight;
 
+          // Strip root-child position tracks from every animation clip.
+          // GLTF exporters often bake "return to export-scene origin" into armature
+          // root-bone position tracks. When mixer.update() runs, the Armature child
+          // snaps back to world origin, overriding our spawn placement. Removing those
+          // position tracks keeps bone rotations (walk cycle) while killing the drift.
+          const rootChildNames = new Set(
+            gltf.scene.children.map(c => c.name).filter(Boolean)
+          );
+          const filteredAnims = (gltf.animations || []).map(clip => {
+            const cleanTracks = clip.tracks.filter(t => {
+              const nodeName = t.name.split('.')[0];
+              const prop     = t.name.split('.').pop();
+              return !(rootChildNames.has(nodeName) && prop === 'position');
+            });
+            return new THREE.AnimationClip(clip.name, clip.duration, cleanTracks);
+          });
+
           // Per-species normalisation — Ghost Rhino gets a different targetHeight
           // than Rhino even though both load from the same file.
-          // scaledBottomOffset = rawBox.min.y × normaliseScale
-          //   (world-space bottom of the mesh when positioned at origin with scale applied)
           for (const name of names) {
-            const entry              = MODEL_FILES.get(name);
-            const targetHeight       = entry ? entry.targetHeight : 1.5;
-            const normaliseScale     = targetHeight / normDim;
-            const scaledBottomOffset = rawBox.min.y * normaliseScale;
+            const entry          = MODEL_FILES.get(name);
+            const targetHeight   = entry ? entry.targetHeight : 1.5;
+            const normaliseScale = targetHeight / normDim;
+
+            // Recompute bbox AFTER scale on a temporary clone — rawBox.min.y * scale
+            // is inaccurate when the model has nested transforms or pre-rotated geometry.
+            const tempScene = gltf.scene.clone();
+            tempScene.scale.setScalar(normaliseScale);
+            tempScene.updateMatrixWorld(true);
+            const scaledBox = new THREE.Box3().setFromObject(tempScene);
+            // yOffset: positive amount to shift mesh UP so its bottom sits at Y=0
+            const yOffset = -scaledBox.min.y;
 
             console.log('[Normalised]', name,
               'rawH:', rawHeight.toFixed(2),
@@ -113,11 +141,15 @@ export async function loadAnimalModels() {
 
             logModelInfo(name, gltf, rawBox);
 
+            console.log('[Final]', name,
+              'height:', (scaledBox.max.y - scaledBox.min.y).toFixed(2),
+              'groundY:', (scaledBox.min.y + yOffset).toFixed(3));
+
             _gltfModels.set(name, {
-              scene:               gltf.scene,
-              animations:          gltf.animations || [],
-              normaliseScale,      // mesh.scale.setScalar(normaliseScale) at spawn time
-              scaledBottomOffset,  // mesh.position.y = terrainY - scaledBottomOffset
+              scene:      gltf.scene,
+              animations: filteredAnims,  // root-position tracks stripped
+              normaliseScale,
+              yOffset,
             });
           }
           resolve();
@@ -152,6 +184,18 @@ export function spawnAnimals(scene) {
     const def    = pool[Math.floor(Math.random() * pool.length)];
     placeAnimal(scene, def);
   }
+
+  // Safety purge: remove any animal within 15 units of player spawn (origin).
+  // Guards against root-motion drift or fallback placement errors.
+  for (let i = G.animals.length - 1; i >= 0; i--) {
+    const a = G.animals[i];
+    const dx = a.x - G.px, dz = a.z - G.pz;
+    if (dx * dx + dz * dz < 15 * 15) {
+      if (a.mixer) { a.mixer.stopAllAction(); _mixers.splice(_mixers.indexOf(a.mixer), 1); }
+      if (a.mesh && a.mesh.parent) { _disposeMesh(a.mesh); a.mesh.parent.remove(a.mesh); }
+      G.animals.splice(i, 1);
+    }
+  }
 }
 
 // ─── placeAnimal — spawns one animal and pushes onto G.animals ────────────────
@@ -163,7 +207,7 @@ export function placeAnimal(scene, def) {
     z = (Math.random() * 2 - 1) * half;
     attempts++;
     const dpx = x - G.px, dpz = z - G.pz;
-    const nearPlayer = (dpx * dpx + dpz * dpz) < 45 * 45;
+    const nearPlayer = (dpx * dpx + dpz * dpz) < 120 * 120;
     const nearAnimal = G.animals.some(a => {
       const dx = a.x - x, dz = a.z - z;
       return dx * dx + dz * dz < 64; // 8-unit radius between animals
@@ -171,7 +215,14 @@ export function placeAnimal(scene, def) {
     tooClose = nearPlayer || nearAnimal;
   } while (tooClose && attempts < 60);
 
-  if (attempts >= 60 && tooClose) return;
+  if (attempts >= 60 && tooClose) {
+    // Hard fallback: place on outer ring 130-190 units from origin
+    const r   = 130 + Math.random() * 60;
+    const ang = Math.random() * Math.PI * 2;
+    const bound = WORLD / 2 - 12;
+    x = Math.max(-bound, Math.min(bound, Math.cos(ang) * r));
+    z = Math.max(-bound, Math.min(bound, Math.sin(ang) * r));
+  }
 
   const y = getTerrainY(x, z);
 
@@ -188,10 +239,9 @@ export function placeAnimal(scene, def) {
     mesh.scale.setScalar(gltfData.normaliseScale);
     mesh.name = def.name;
 
-    // Place feet on terrain: scaledBottomOffset = rawBox.min.y × normaliseScale
-    // mesh.position.y = terrainY - scaledBottomOffset puts the model bottom at terrainY
-    meshBottomOffset = gltfData.scaledBottomOffset;
-    mesh.position.set(x, y - meshBottomOffset, z);
+    // Place feet on terrain: yOffset lifts mesh so its bottom sits at terrainY
+    meshBottomOffset = gltfData.yOffset;
+    mesh.position.set(x, y + meshBottomOffset, z);
 
     if (gltfData.animations.length > 0) {
       mixer = new THREE.AnimationMixer(mesh);
@@ -226,7 +276,7 @@ export function placeAnimal(scene, def) {
     baseBodyY,
     mixer,             // null for procedural animals
     useGltf:           !!gltfData,
-    meshBottomOffset,  // 0 for procedural; bottomOffset×scale for GLTF
+    meshBottomOffset,  // 0 for procedural; yOffset (positive, lifts mesh to terrain) for GLTF
     fleeSounded:  false,
     wounded:      false,
     woundedAt:    0,
@@ -567,8 +617,8 @@ export function updateAnimals(dt, camera) {
     }
 
     // ── Position + orient mesh ─────────────────────────────────────────────
-    // meshBottomOffset is 0 for procedural meshes, so this formula is universal.
-    a.mesh.position.set(a.x, meshY - a.meshBottomOffset, a.z);
+    // meshBottomOffset is 0 for procedural meshes, yOffset (positive) for GLTF.
+    a.mesh.position.set(a.x, meshY + a.meshBottomOffset, a.z);
     a.mesh.rotation.y = -a.angle + Math.PI / 2;
     // Wounded limp: irregular lateral roll simulating leg injury
     a.mesh.rotation.z = a.wounded ? Math.sin(a.bobT * 3) * 0.15 : 0;

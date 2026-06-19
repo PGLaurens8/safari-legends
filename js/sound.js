@@ -21,29 +21,61 @@ export function initAudio() {
 }
 
 function _startAmbient() {
-  // 2s looping white noise → bandpass filter → very quiet gain
-  const dur = 2;
+  // Wind: looping noise through low bandpass — distant, barely audible
+  const dur = 4;
   const len = Math.ceil(_ctx.sampleRate * dur);
   const buf = _ctx.createBuffer(1, len, _ctx.sampleRate);
   const ch  = buf.getChannelData(0);
   for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
 
-  const src    = _ctx.createBufferSource();
-  src.buffer   = buf;
-  src.loop     = true;
+  const src  = _ctx.createBufferSource();
+  src.buffer = buf;
+  src.loop   = true;
 
   const filter = _ctx.createBiquadFilter();
   filter.type            = 'bandpass';
-  filter.frequency.value = 2500; // bird-like upper texture
-  filter.Q.value         = 3;
+  filter.frequency.value = 180;
+  filter.Q.value         = 0.4;
 
-  const gain = _ctx.createGain();
-  gain.gain.value = 0.04;
+  const windGain = _ctx.createGain();
+  windGain.gain.value = 0.006;
 
   src.connect(filter);
-  filter.connect(gain);
-  gain.connect(_masterGain);
+  filter.connect(windGain);
+  windGain.connect(_masterGain);
   src.start();
+
+  // Bird chirps: random sine sweep every 8–15 seconds
+  function scheduleBirdChirp() {
+    setTimeout(() => {
+      if (!G.running) return; // stop scheduling when game ends
+      _playBirdChirp();
+      scheduleBirdChirp();
+    }, 8000 + Math.random() * 7000);
+  }
+  scheduleBirdChirp();
+}
+
+function _playBirdChirp() {
+  if (!_ctx) return;
+  const now     = _ctx.currentTime;
+  const startHz = 1200 + Math.random() * 1200; // 1200–2400 Hz
+  const endHz   = 1200 + Math.random() * 1200;
+
+  const osc = _ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(startHz, now);
+  osc.frequency.linearRampToValueAtTime(endHz, now + 0.08);
+
+  const gain = _ctx.createGain();
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(0.06, now + 0.01);
+  gain.gain.linearRampToValueAtTime(0, now + 0.08);
+
+  osc.connect(gain);
+  gain.connect(_masterGain);
+  osc.start(now);
+  osc.stop(now + 0.09);
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────

@@ -7,13 +7,17 @@ let _sun       = null; // DirectionalLight ref
 let _ambient   = null; // AmbientLight ref
 let _scene     = null; // scene ref for background + fog updates
 let _sunSphere = null; // visible sun disc — tracks _sun.position each frame
-let _dayTime   = 0.0;  // 0=dawn, 0.5=noon, 1.0=dusk; wraps at 1
+let _dayTime   = 0.35; // 0=dawn, 0.5=noon, 1.0=dusk; start at mid-morning
 
 // Reusable Color instances — updated in place each frame to avoid GC churn
-const _skyColDawn = new THREE.Color('#e8541a');
-const _skyColNoon = new THREE.Color('#88bb52');
-const _skyColDusk = new THREE.Color('#c8601a');
-const _bgColor    = new THREE.Color('#e8541a');
+const _skyColDawn = new THREE.Color('#f8d4b0'); // warm peach
+const _skyColNoon = new THREE.Color('#4a9fd4'); // clear blue
+const _skyColDusk = new THREE.Color('#c8601a'); // deep orange
+const _bgColor    = new THREE.Color('#4a9fd4'); // init to blue (matches noon sky)
+const _fogColDawn = new THREE.Color('#d4956a');
+const _fogColNoon = new THREE.Color('#6aaa3a');
+const _fogColDusk = new THREE.Color('#c8601a');
+const _fogColor   = new THREE.Color('#6aaa3a'); // updated in place each frame
 
 // ─── Grass sway state ─────────────────────────────────────────────────────────
 let _worldTime = 0;
@@ -99,7 +103,7 @@ function buildLights(scene) {
   _sun.shadow.bias = -0.001;
   scene.add(_sun);
 
-  _ambient = new THREE.AmbientLight(0x405a28, 1.3);
+  _ambient = new THREE.AmbientLight(0xc8d8e8, 0.9); // neutral blue-white, no green tint
   scene.add(_ambient);
 
   const fill = new THREE.DirectionalLight(0x6090ff, 0.35);
@@ -112,17 +116,21 @@ function buildSky(scene) {
   const geo  = new THREE.SphereGeometry(790, 32, 16);
   const pos  = geo.attributes.position;
   const cols = [];
-  const horizon = new THREE.Color('#6aaa3a');
-  const zenith  = new THREE.Color('#1a3a20');
+  const skyHorizon = new THREE.Color('#c8e8ff'); // warm light blue-white haze
+  const skyMid     = new THREE.Color('#4a9fd4'); // clear bright blue
+  const skyZenith  = new THREE.Color('#1a5fa8'); // deep blue
 
   for (let i = 0; i < pos.count; i++) {
     const t = THREE.MathUtils.clamp((pos.getY(i) + 790) / 1580, 0, 1);
-    const c = new THREE.Color().lerpColors(horizon, zenith, t);
+    const c = new THREE.Color();
+    if (t < 0.5) c.lerpColors(skyHorizon, skyMid, t * 2);
+    else         c.lerpColors(skyMid, skyZenith, (t - 0.5) * 2);
     cols.push(c.r, c.g, c.b);
   }
 
   geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
-  const sky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide }));
+  // fog: false — sky sphere is at r=790 so FogExp2 factor≈1 would fully tint it otherwise
+  const sky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }));
   sky.name = 'sky';
   scene.add(sky);
 
@@ -259,8 +267,13 @@ export function updateDayNight(dt) {
     _bgColor.lerpColors(_skyColNoon, _skyColDusk, (_dayTime - 0.5) * 2);
   }
 
-  // Fog colour tracks sky so horizon blends naturally
-  _scene.fog.color.copy(_bgColor).multiplyScalar(0.7);
+  // Fog colour lerps independently (savanna haze has green-blue tint at noon)
+  if (_dayTime < 0.5) {
+    _fogColor.lerpColors(_fogColDawn, _fogColNoon, _dayTime * 2);
+  } else {
+    _fogColor.lerpColors(_fogColNoon, _fogColDusk, (_dayTime - 0.5) * 2);
+  }
+  _scene.fog.color.copy(_fogColor);
 
   // Sun disc tracks light direction (normalize + project to ~700 unit radius)
   if (_sunSphere) {
